@@ -1,0 +1,16 @@
+{
+  "name": "DreamXcast",
+  "slug": "ps5-dreamcastx",
+  "version": "0.2.2",
+  "titleId": "PPSA99765",
+  "contentId": "UP9000-PPSA99765_00-PS5DREAMCASTX001",
+  "contentVersion": "01.000.012",
+  "releaseTag": "ps5-dreamcastx-v0.2.2",
+  "core": "Press5elect/PSFlycast",
+  "frontend": "Unified Internal/USB/SMB library; editable SMB settings; fast cover cache",
+  "brand": "YAHBALLON",
+  "installFolder": "PS5DreamcastX",
+  "internalGameDirectory": "/data/PS5DreamcastX/games",
+  "usbGameDirectory": "/mnt/usb0/PS5DreamcastX (recursive, includes games/)",
+  "dataFolder": "/data/PS5DreamcastX"
+}
