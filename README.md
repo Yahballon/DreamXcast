@@ -1,5 +1,7 @@
 # DreamXcast
-
+<p align="center">
+  <img src="screenshots/1.png" alt="PS5NES game shelf">
+</p>
 **Native Dreamcast emulation on PS5 with white DVD-style CoverFlow cases, angled neighbours and subtle reflections.**
 
 Version **0.2.2** · Title ID **PPSA99765** · **by YAHBALLON**.
