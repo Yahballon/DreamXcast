@@ -1,0 +1,7 @@
+# Generated native PS5 builds (never commit SDK/toolchain artifacts)
+build/
+dist/
+__pycache__/
+*.py[cod]
+.DS_Store
+*.log

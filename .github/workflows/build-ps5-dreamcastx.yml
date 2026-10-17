@@ -1,0 +1,140 @@
+name: Build DreamXcast PS5 and Release
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'assets/**'
+      - 'tests/**'
+      - 'app.json'
+      - 'RELEASE_NOTES.md'
+      - 'README.md'
+      - '.github/workflows/build-ps5-dreamcastx.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'assets/**'
+      - 'tests/**'
+      - 'app.json'
+      - 'RELEASE_NOTES.md'
+      - 'README.md'
+      - '.github/workflows/build-ps5-dreamcastx.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ps5-dreamcastx-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-ps5:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PS5 cross-compiler and Mesa build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential git ca-certificates wget curl tar unzip zip rsync \
+            clang-18 lld-18 llvm-18 llvm-18-dev llvm-18-tools libclang-18-dev libllvmspirvlib-18-dev llvm-spirv-18 \
+            cmake ninja-build make pkg-config meson glslang-tools \
+            python3 python3-dev python3-venv python3-numpy python3-pil python3-mako libavif-bin \
+            python3-markupsafe libzstd-dev libssl-dev zstd bison flex \
+            libzip-dev libclc-18 libgl1-mesa-dev
+          if apt-cache show llvm-spirv-18 >/dev/null 2>&1; then
+            sudo apt-get install -y llvm-spirv-18
+          fi
+          echo '/usr/lib/llvm-18/bin' >> "$GITHUB_PATH"
+      - name: Validate LLVM 18 SPIR-V translator and Mesa dependencies
+        run: |
+          llvm-config-18 --version
+          pkg-config --modversion LLVMSPIRVLib
+          pkg-config --exists LLVMSPIRVLib || {
+            echo "::error::Missing LLVMSPIRVLib development package (libllvmspirvlib-18-dev)"
+            exit 1
+          }
+          dpkg-query -W libllvmspirvlib-18-dev llvm-spirv-18
+      - name: Install Meson 1.9.2 (Mesa requires at least 1.4)
+        run: |
+          python3 -m venv --system-site-packages "$RUNNER_TEMP/ps5-dreamcastx-tools"
+          "$RUNNER_TEMP/ps5-dreamcastx-tools/bin/python" -m pip install \
+            --disable-pip-version-check 'meson==1.9.2'
+          echo "$RUNNER_TEMP/ps5-dreamcastx-tools/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/ps5-dreamcastx-tools/bin/meson" --version
+
+      - name: Syntax-check the PS5GBAX-inspired cover-flow renderer
+        run: |
+          clang++-18 -std=c++20 -Wall -Wextra -Wno-unused-parameter \
+            -o /tmp/dreamcastx-shelf-test tests/compile_shelf.cpp
+          /tmp/dreamcastx-shelf-test
+          clang++-18 -std=c++20 -Wall -Wextra \
+            -o /tmp/dreamcastx-order-test tests/shelf_order_test.cpp
+          /tmp/dreamcastx-order-test
+          clang++-18 -std=c++20 -Wall -Wextra -pthread \
+            -o /tmp/dreamcastx-smb-settings-test tests/smb_settings_test.cpp
+          /tmp/dreamcastx-smb-settings-test
+          clang++-18 -std=c++20 -O1 -pthread -Wall -Wextra \
+            -o /tmp/dreamcastx-cover-async-test tests/compile_cover_async.cpp
+          /tmp/dreamcastx-cover-async-test
+          clang++-18 -std=c++20 -Wall -Wextra -Wno-unused-parameter \
+            -o /tmp/dreamcastx-usb-test tests/usb_scan_test.cpp
+          /tmp/dreamcastx-usb-test
+          python3 -m py_compile scripts/prepare.py scripts/verify.py assets/generate_icon.py
+          python3 -m py_compile scripts/verify_package.py
+          python3 tests/test_package_structure.py
+          test -s assets/dreamxcast-neon.avif
+          python3 assets/generate_icon.py /tmp/dreamcastx-neon-icon.png
+      - name: Fetch pinned native Flycast and integrate game shelf
+        run: |
+          python3 scripts/prepare.py
+          python3 scripts/verify.py
+      - name: Build pinned PS5 Vulkan RADV and PS5 Payload SDK
+        timeout-minutes: 315
+        run: bash scripts/bootstrap-ps5.sh
+      - name: Native PS5 compile and signed ZIP packaging
+        timeout-minutes: 30
+        env:
+          PS5_VULKAN_DIR: ${{ github.workspace }}/build/PS5_Vulkan
+          PS5_PAYLOAD_SDK: ${{ github.workspace }}/build/PS5_VulkanTemplate/.deps/native/ps5-payload-sdk
+          LIBSMB2_DIR: ${{ github.workspace }}/build/libsmb2
+          JOBS: '4'
+        run: bash scripts/build.sh
+      - name: Verify app package
+        run: python3 scripts/verify_package.py dist/PPSA99765.zip
+      - name: Upload PS5 test build
+        uses: actions/upload-artifact@v4
+        with:
+          name: DreamXcast-PS5-${{ github.sha }}
+          path: dist/PPSA99765.zip
+          if-no-files-found: error
+
+      - name: Publish compiled DreamXcast Release
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          app=json.loads(Path('app.json').read_text())
+          assert app['titleId']=='PPSA99765'
+          assert app['releaseTag']=='ps5-dreamcastx-v'+app['version']
+          assert Path('dist/PPSA99765.zip').stat().st_size > 100000
+          PY
+          version=$(python3 -c 'import json;print(json.load(open("app.json"))["version"])')
+          tag=$(python3 -c 'import json;print(json.load(open("app.json"))["releaseTag"])')
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists. Increase app.json version for the next release."
+            exit 0
+          fi
+          gh release create "$tag" dist/PPSA99765.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "DreamXcast v$version" \
+            --notes-file RELEASE_NOTES.md
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json url
