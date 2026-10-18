@@ -1,4 +1,4 @@
-# DreamXcast
+# DreamXcast is a passion project, not a piracy project.
 <p align="center">
   <img src="screenshots/1.png" alt="PS5NES game shelf">
 </p>
